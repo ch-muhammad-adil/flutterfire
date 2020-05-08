@@ -6,12 +6,23 @@ package io.flutter.plugins.firebasemessaging;
 
 import android.app.ActivityManager;
 import android.app.KeyguardManager;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
+import android.media.RingtoneManager;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Process;
 import android.util.Log;
+
+import androidx.core.app.NotificationCompat;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
@@ -88,31 +99,39 @@ public class FlutterFirebaseMessagingService extends FirebaseMessagingService {
     // If application is running in the foreground use local broadcast to handle message.
     // Otherwise use the background isolate to handle message.
     if (isApplicationForeground(this)) {
-      Intent intent = new Intent(ACTION_REMOTE_MESSAGE);
-      intent.putExtra(EXTRA_REMOTE_MESSAGE, remoteMessage);
-      LocalBroadcastManager.getInstance(this).sendBroadcast(intent);
+      DataNotification dataNotification = new DataNotification();
+      dataNotification.setTitle(remoteMessage.getData().get("title"));
+      dataNotification.setPostId(remoteMessage.getData().get("postId"));
+      dataNotification.setBody(remoteMessage.getData().get("body"));
+      dataNotification.setProfilePicture(remoteMessage.getData().get("icon"));
+      showNotification(this, dataNotification, remoteMessage);
     } else {
-      // If background isolate is not running yet, put message in queue and it will be handled
-      // when the isolate starts.
-      if (!isIsolateRunning.get()) {
-        backgroundMessageQueue.add(remoteMessage);
-      } else {
-        final CountDownLatch latch = new CountDownLatch(1);
-        new Handler(getMainLooper())
-            .post(
-                new Runnable() {
-                  @Override
-                  public void run() {
-                    executeDartCallbackInBackgroundIsolate(
-                        FlutterFirebaseMessagingService.this, remoteMessage, latch);
-                  }
-                });
-        try {
-          latch.await();
-        } catch (InterruptedException ex) {
-          Log.i(TAG, "Exception waiting to execute Dart callback", ex);
-        }
-      }
+
+      Intent intent = new Intent(this, NotificationReceiver.class);
+      intent.putExtra(EXTRA_REMOTE_MESSAGE, remoteMessage);
+      sendBroadcast(intent);
+
+//      // If background isolate is not running yet, put message in queue and it will be handled
+//      // when the isolate starts.
+//      if (!isIsolateRunning.get()) {
+//        backgroundMessageQueue.add(remoteMessage);
+//      } else {
+//        final CountDownLatch latch = new CountDownLatch(1);
+//        new Handler(getMainLooper())
+//            .post(
+//                new Runnable() {
+//                  @Override
+//                  public void run() {
+//                    executeDartCallbackInBackgroundIsolate(
+//                        FlutterFirebaseMessagingService.this, remoteMessage, latch);
+//                  }
+//                });
+//        try {
+//          latch.await();
+//        } catch (InterruptedException ex) {
+//          Log.i(TAG, "Exception waiting to execute Dart callback", ex);
+//        }
+//      }
     }
   }
 
@@ -328,5 +347,53 @@ public class FlutterFirebaseMessagingService extends FirebaseMessagingService {
       }
     }
     return false;
+  }
+
+  private void showNotification(final Context context, DataNotification dataNotification, RemoteMessage remoteMessage) {
+    int NotificationID = 1001;
+    NotificationManager mNotificationManager =
+            (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+    String CHANNEL_ID = "INSTASALAM_NAMAZ_PUSH_NOTIFY";
+    CharSequence name = "INSTASALAM_PUSH";
+    String description = "Comments notifications";
+    int importance = NotificationManager.IMPORTANCE_DEFAULT;
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      NotificationChannel mChannel = new NotificationChannel(CHANNEL_ID, name, importance);
+      // Configure the notification channel.
+      mChannel.setDescription(description);
+      mChannel.enableLights(true);
+      // Sets the notification light color for notifications posted to this
+      // channel, if the device supports this feature.
+      mChannel.setLightColor(Color.RED);
+      mChannel.enableVibration(true);
+      mNotificationManager.createNotificationChannel(mChannel);
+    }
+
+
+    Bitmap bitmap = BitmapFactory.decodeResource(context.getResources(), R.drawable.applogo);
+    NotificationCompat.Builder mBuilder = new NotificationCompat.Builder(this, CHANNEL_ID)
+            .setLargeIcon(bitmap)
+            .setSmallIcon(R.drawable.notification_icon)
+            .setContentTitle(dataNotification.getTitle())
+            .setContentText(dataNotification.getBody())
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(dataNotification.getBody()))
+            .setDefaults(Notification.DEFAULT_ALL)
+            .setAutoCancel(true)
+            .setChannelId(CHANNEL_ID)
+            .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION));
+
+    Intent intent = new Intent(context, AppForegroundReceiver.class);
+    intent.putExtra(EXTRA_REMOTE_MESSAGE, remoteMessage);
+    PendingIntent resultPendingIntent = PendingIntent.getBroadcast(
+            context,
+            202,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT
+    );
+
+    mBuilder.setContentIntent(resultPendingIntent);
+
+    mNotificationManager.notify(NotificationID, mBuilder.build());
   }
 }
